@@ -1,36 +1,18 @@
-# Feast Hive Support
-
-Hive is not included in current [Feast](https://github.com/feast-dev/feast) roadmap, this project intends to add Hive support for Offline Store.  
-For more details, can check [this Feast issue](https://github.com/feast-dev/feast/issues/1686).
+# Feast Snowflake Offline Store Support
 
 **The public releases have passed all integration tests, please create an issue if you got any problem.**
 
 ## Change Logs
-- DONE [v0.1.1] ~~I am working on the first workable version, think it will be released in a couple of days.~~
-- DONE [v0.1.2] ~~Allow custom hive conf when connect to a HiveServer2~~
-- DONE [v0.14.0] ~~Support Feast 0.14.x~~
-- TODO It currently supports `insert into` for uploading entity_df, which is a little inefficient, gonna add extra parameters for people who are able to provide HDFS address in next version (for uploading to HDFS). 
+- DONE [v0.1.0] ~~Submit initial working code~~
 
 ## Quickstart
 
-#### Install feast
-
-```shell
-pip install feast
-```
-
-#### Install feast-hive
+#### Install feast-snowflake
 
 - Install stable version
 
 ```shell
-pip install feast-hive 
-```
-
-- Install develop version (not stable):
-
-```shell
-pip install git+https://github.com/baineng/feast-hive.git 
+pip install feast-snowflake
 ```
 
 #### Create a feature repository
@@ -42,32 +24,34 @@ cd feature_repo
 
 #### Edit `feature_store.yaml`
 
-set `offline_store` type to be `feast_hive.HiveOfflineStore`
+set `offline_store` type to be `feast_snowflake.SnowflakeOfflineStore`
 
 ```yaml
 project: ...
 registry: ...
 provider: local
 offline_store:
-    type: feast_hive.HiveOfflineStore
-    host: localhost
-    port: 10000        # optional, default is `10000`
-    database: default  # optional, default is `default`
-    hive_conf:         # optional, hive conf overlay
-      hive.join.cache.size: 14797
-      hive.exec.max.dynamic.partitions: 779
-    ... # other parameters
+    type: feast_snowflake.SnowflakeOfflineStore
+    deployment: SNOWFLAKE_DEPLOYMENT_URL #drop .snowflakecomputing.com
+    user: USERNAME
+    password: PASSWORD
+    role: ROLE_NAME #remember cap sensitive
+    warehouse: WAREHOUSE_NAME #remember cap sensitive
+    database: DATABASE_NAME #remember cap sensitive
 online_store:
     ...
 ```
 
 #### Create Hive Table
 
-1. Upload `data/driver_stats.parquet` to HDFS
+1. Upload `data/driver_stats.parquet` to Snowflake
+
 ```shell
 hdfs dfs -copyFromLocal ./data/driver_stats.parquet /tmp/
 ```
+
 2. Create Hive Table
+
 ```sql
 CREATE TABLE driver_stats (
     event_timestamp   bigint,
@@ -79,7 +63,9 @@ CREATE TABLE driver_stats (
 )
 STORED AS PARQUET;
 ```
+
 3. Load data into the table
+
 ```sql
 LOAD DATA INPATH '/tmp/driver_stats.parquet' INTO TABLE driver_stats;
 ```
@@ -95,14 +81,14 @@ from feast import Entity, Feature, FeatureView, ValueType
 from feast_hive import HiveSource
 
 # Read data from Hive table
-# Here we use a Query to reuse the original parquet data, 
+# Here we use a Query to reuse the original parquet data,
 # but you can replace to your own Table or Query.
 driver_hourly_stats = HiveSource(
     # table='driver_stats',
     query = """
-    SELECT Timestamp(cast(event_timestamp / 1000000 as bigint)) AS event_timestamp, 
-           driver_id, conv_rate, acc_rate, avg_daily_trips, 
-           Timestamp(cast(created / 1000000 as bigint)) AS created 
+    SELECT Timestamp(cast(event_timestamp / 1000000 as bigint)) AS event_timestamp,
+           driver_id, conv_rate, acc_rate, avg_daily_trips,
+           Timestamp(cast(created / 1000000 as bigint)) AS created
     FROM driver_stats
     """,
     event_timestamp_column="event_timestamp",

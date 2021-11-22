@@ -13,7 +13,6 @@ from feast.data_source import DataSource
 from feast.errors import InvalidEntityType
 from feast.feature_view import (
     DUMMY_ENTITY_ID,
-    DUMMY_ENTITY_NAME,
     DUMMY_ENTITY_VAL,
     FeatureView,
 )
@@ -243,68 +242,6 @@ class SnowflakeRetrievalJob(RetrievalJob):
                 return pa.Table.from_pandas(
                     pd.DataFrame(columns=[md.name for md in empty_result.description])
                 )
-
-    # Used when we use snowflake as a provider
-    # currently no support for odfv
-    def _to_internal_table(
-        self, feature_view: FeatureView, feature_name_columns: List[str]
-    ) -> None:
-        with self._query_generator() as query:
-
-            feature_name_str = "', '".join(feature_name_columns)
-
-            if feature_view.entities[0] == DUMMY_ENTITY_NAME:
-                entity_key = DUMMY_ENTITY_ID
-            else:
-                entity_key = feature_view.entities[0]
-
-            query = f"""
-                INSERT OVERWRITE INTO "{self.config.online_store.database}"."PUBLIC"."{self.config.project}_{feature_view.name}"
-                    SELECT
-                        "entity_key"::VARIANT,
-                        "feature_name",
-                        "value",
-                        "event_ts",
-                        "created_ts"
-                    FROM
-                    (
-                      SELECT
-                        *,
-                        ROW_NUMBER() OVER(PARTITION BY "entity_key","feature_name" ORDER BY "event_ts" DESC, "created_ts" DESC) AS "_feast_row"
-                      FROM
-                      (
-                        SELECT
-                            "entity_key",
-                            PATH AS "feature_name",
-                            VALUE AS "value",
-                            "event_ts",
-                            "created_ts"
-                        FROM
-                        (
-                          SELECT
-                            "{entity_key}" AS "entity_key",
-                            OBJECT_PICK(OBJECT_CONSTRUCT(*), '{feature_name_str}') AS "feature_name",
-                            "event_timestamp" AS "event_ts",
-                            "created" AS "created_ts"
-                          FROM
-                          (
-                            {query}
-                          )
-                        ), LATERAL FLATTEN(INPUT => "feature_name")
-                        UNION ALL
-                        SELECT
-                            *
-                        FROM
-                            "{self.config.online_store.database}"."PUBLIC"."{self.config.project}_{feature_view.name}"
-                      )
-                    )
-                    WHERE
-                      "_feast_row" = 1;
-                """
-
-            self.snowflake_conn.cursor().execute(query).close()
-
-        return None
 
     def to_snowflake(self, table_name: str) -> None:
         """ Save dataset as a new Snowflake table """
