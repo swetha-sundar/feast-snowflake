@@ -9,8 +9,6 @@
 
 #### Install feast-snowflake
 
-- Install stable version
-
 ```shell
 pip install feast-snowflake
 ```
@@ -30,6 +28,8 @@ set `offline_store` type to be `feast_snowflake.SnowflakeOfflineStore`
 project: ...
 registry: ...
 provider: local
+online_store:
+    ...
 offline_store:
     type: feast_snowflake.SnowflakeOfflineStore
     deployment: SNOWFLAKE_DEPLOYMENT_URL #drop .snowflakecomputing.com
@@ -38,8 +38,23 @@ offline_store:
     role: ROLE_NAME #remember cap sensitive
     warehouse: WAREHOUSE_NAME #remember cap sensitive
     database: DATABASE_NAME #remember cap sensitive
-online_store:
-    ...
+
+```
+
+#### Upload sample data to Snowflake
+
+```python
+from feast_snowflake.snowflake_utils import create_new_snowflake_table, get_snowflake_conn
+from snowflake.connector.pandas_tools import write_pandas
+from feast import FeatureStore
+import pandas as pd
+
+fs = FeatureStore(repo_path=".")
+
+conn = get_snowflake_conn(fs.config.offline_store)
+
+create_new_snowflake_table(conn, pd.read_parquet('data/driver_stats.parquet'), 'DRIVER_STATS')
+write_pandas(conn, pd.read_parquet('data/driver_stats.parquet'), 'DRIVER_STATS')
 ```
 
 #### Edit `example.py`
@@ -49,18 +64,16 @@ online_store:
 from datetime import timedelta
 from feast import Entity, Feature, FeatureView, ValueType
 from feast_snowflake import SnowflakeSource
+import yaml
 
 # Read data from Snowflake table
-# Here we use a Query to reuse the original parquet data,
+# Here we use a Table to reuse the original parquet data,
 # but you can replace to your own Table or Query.
+database = yaml.safe_load(open("feature_store.yaml"))["offline_store"]["database"]
+
 driver_hourly_stats = SnowflakeSource(
-    # table='driver_stats',
-    query = """
-    SELECT Timestamp(cast(event_timestamp / 1000000 as bigint)) AS event_timestamp,
-           driver_id, conv_rate, acc_rate, avg_daily_trips,
-           Timestamp(cast(created / 1000000 as bigint)) AS created
-    FROM driver_stats
-    """,
+    table=f'"{database}"."PUBLIC"."DRIVER_STATS"',
+    #query = """ """,
     event_timestamp_column="event_timestamp",
     created_timestamp_column="created",
 )
@@ -84,12 +97,50 @@ driver_hourly_stats_view = FeatureView(
 )
 ```
 
-#### Apply the feature definitions
+#### Work with your Offline Snowflake Feature Store
 
-```shell
-feast apply
+```python
+from example import driver, driver_hourly_stats_view
+from datetime import datetime, timedelta
+import pandas as pd
+from feast import FeatureStore
+
+fs = FeatureStore(repo_path=".")
+
+fs.apply([driver, driver_hourly_stats_view])
+
+# Select features
+features = ["driver_hourly_stats:conv_rate", "driver_hourly_stats:acc_rate", "driver_hourly_stats:avg_daily_trips"]
+
+# Create an entity dataframe. This is the dataframe that will be enriched with historical features
+entity_df = pd.DataFrame(
+    {
+        "event_timestamp": [
+            pd.Timestamp(dt, unit="ms", tz="UTC").round("ms")
+            for dt in pd.date_range(
+                start=datetime.now() - timedelta(days=3),
+                end=datetime.now(),
+                periods=3,
+            )
+        ],
+        "driver_id": [1001, 1002, 1003],
+    }
+)
+
+# Retrieve historical features by joining the entity dataframe to the Snowflake table source
+print("Retrieving training data...")
+training_df = fs.get_historical_features(
+    features=features, entity_df=entity_df
+).to_df()
+print(training_df)
+
+print("Loading features into the online store...")
+fs.materialize_incremental(end_date=datetime.now())
+
+# Retrieve features from the online store
+print("Retrieving online features...")
+online_features = fs.get_online_features(
+    features=features, entity_rows=[{"driver_id": 1001}, {"driver_id": 1002}],
+).to_dict()
+print(online_features)
 ```
-
-#### Generating training data and so on
-
-The rest are as same as [Feast Quickstart](https://docs.feast.dev/quickstart#generating-training-data)
