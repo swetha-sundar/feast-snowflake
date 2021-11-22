@@ -24,7 +24,7 @@ setup(
         "Bug Tracker": "https://github.com/sfc-gh-madkins/feast-snowflake/issues",
     },
     license='Apache License, Version 2.0',
-    packages=["feast_snowflake", "feast_postgres.online_stores", "feast_postgres.offline_stores"],
+    packages=["feast_snowflake", ],
     install_requires=INSTALL_REQUIRE,
     keywords=("feast featurestore snowflake offlinestore"),
     classifiers=[

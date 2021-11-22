@@ -8,7 +8,7 @@ import pyarrow as pa
 from pydantic import StrictStr
 from pydantic.typing import Literal
 
-from feast import OnDemandFeatureView, SnowflakeSource
+from feast import OnDemandFeatureView
 from feast.data_source import DataSource
 from feast.errors import InvalidEntityType
 from feast.feature_view import (
@@ -25,6 +25,8 @@ from feast_snowflake.snowflake_utils import (
 from feast.registry import Registry
 from feast.repo_config import FeastConfigBaseModel, RepoConfig
 
+from feast_snowflake.snowflake_source import SnowflakeSource
+
 try:
     from snowflake.connector import SnowflakeConnection
     from snowflake.connector.pandas_tools import write_pandas
@@ -37,7 +39,7 @@ except ImportError as e:
 class SnowflakeOfflineStoreConfig(FeastConfigBaseModel):
     """ Offline store config for Snowflake """
 
-    type: Literal["snowflake"] = "snowflake"
+    type: Literal["feast_snowflake.SnowflakeOfflineStore"] = "feast_snowflake.SnowflakeOfflineStore"
     """ Offline store type selector"""
 
     deployment: StrictStr

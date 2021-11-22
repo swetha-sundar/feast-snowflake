@@ -1,19 +1,18 @@
 import random
 import string
 from typing import Callable, Dict, Iterable, Optional, Tuple
-
-from feast import type_map
+import json
+from feast_snowflake.snowflake_type_map import snowflake_to_feast_value_type
 from feast.data_source import DataSource
 from feast.protos.feast.core.DataSource_pb2 import DataSource as DataSourceProto
 from feast.repo_config import RepoConfig
 from feast.value_type import ValueType
+import pickle
 
 
 class SnowflakeSource(DataSource):
     def __init__(
         self,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
         table: Optional[str] = None,
         query: Optional[str] = None,
         event_timestamp_column: Optional[str] = "",
@@ -45,11 +44,8 @@ class SnowflakeSource(DataSource):
             date_partition_column,
         )
 
-        # The default Snowflake schema is named "PUBLIC".
-        schema = "PUBLIC" if (database and table and not schema) else schema
-
         self._snowflake_options = SnowflakeOptions(
-            database=database, schema=schema, table=table, query=query
+            table=table, query=query
         )
 
     @staticmethod
@@ -63,15 +59,18 @@ class SnowflakeSource(DataSource):
         Returns:
             A SnowflakeSource object based on the data_source protobuf.
         """
+
+        assert data_source.HasField("custom_options")
+
+        snowflake_options = SnowflakeOptions.from_proto(data_source.custom_options)
+
         return SnowflakeSource(
             field_mapping=dict(data_source.field_mapping),
-            database=data_source.snowflake_options.database,
-            schema=data_source.snowflake_options.schema,
-            table=data_source.snowflake_options.table,
+            table=snowflake_options.table,
             event_timestamp_column=data_source.event_timestamp_column,
             created_timestamp_column=data_source.created_timestamp_column,
             date_partition_column=data_source.date_partition_column,
-            query=data_source.snowflake_options.query,
+            query=snowflake_options.query,
         )
 
     def __eq__(self, other):
@@ -81,24 +80,12 @@ class SnowflakeSource(DataSource):
             )
 
         return (
-            self.snowflake_options.database == other.snowflake_options.database
-            and self.snowflake_options.schema == other.snowflake_options.schema
-            and self.snowflake_options.table == other.snowflake_options.table
+            self.snowflake_options.table == other.snowflake_options.table
             and self.snowflake_options.query == other.snowflake_options.query
             and self.event_timestamp_column == other.event_timestamp_column
             and self.created_timestamp_column == other.created_timestamp_column
             and self.field_mapping == other.field_mapping
         )
-
-    @property
-    def database(self):
-        """Returns the database of this snowflake source."""
-        return self._snowflake_options.database
-
-    @property
-    def schema(self):
-        """Returns the schema of this snowflake source."""
-        return self._snowflake_options.schema
 
     @property
     def table(self):
@@ -128,9 +115,9 @@ class SnowflakeSource(DataSource):
             A DataSourceProto object.
         """
         data_source_proto = DataSourceProto(
-            type=DataSourceProto.BATCH_SNOWFLAKE,
+            type=DataSourceProto.CUSTOM_SOURCE,
             field_mapping=self.field_mapping,
-            snowflake_options=self.snowflake_options.to_proto(),
+            custom_options=self.snowflake_options.to_proto(),
         )
 
         data_source_proto.event_timestamp_column = self.event_timestamp_column
@@ -146,14 +133,14 @@ class SnowflakeSource(DataSource):
 
     def get_table_query_string(self) -> str:
         """Returns a string that can directly be used to reference this table in SQL."""
-        if self.table and self.database:
-            return f'"{self.database}"."{self.schema}"."{self.table}"'
+        if self.table:
+            return f'{self.table}'
         else:
             return f"({self.query})"
 
     @staticmethod
     def source_datatype_to_feast_value_type() -> Callable[[str], ValueType]:
-        return type_map.snowflake_to_feast_value_type
+        return snowflake_to_feast_value_type
 
     def get_table_column_names_and_types(
         self, config: RepoConfig
@@ -165,8 +152,8 @@ class SnowflakeSource(DataSource):
             config: A RepoConfig describing the feature repo
         """
 
-        from feast.infra.offline_stores.snowflake import SnowflakeOfflineStoreConfig
-        from feast.infra.utils.snowflake_utils import get_snowflake_conn
+        from feast_snowflake.snowflake import SnowflakeOfflineStoreConfig
+        from feast_snowflake.snowflake_utils import get_snowflake_conn
 
         assert isinstance(config.offline_store, SnowflakeOfflineStoreConfig)
 
@@ -175,7 +162,7 @@ class SnowflakeSource(DataSource):
         cur = snowflake_conn.cursor()
         if self.table is not None:
             metadata = cur.execute(
-                f'DESCRIBE TABLE "{self.database}"."{self.schema}"."{self.table}"'
+                f'DESCRIBE TABLE {self.table}'
             ).fetchall()
 
         else:
@@ -201,13 +188,9 @@ class SnowflakeOptions:
 
     def __init__(
         self,
-        database: Optional[str],
-        schema: Optional[str],
         table: Optional[str],
         query: Optional[str],
     ):
-        self._database = database
-        self._schema = schema
         self._table = table
         self._query = query
 
@@ -222,26 +205,6 @@ class SnowflakeOptions:
         self._query = query
 
     @property
-    def database(self):
-        """Returns the database name of this snowflake table."""
-        return self._database
-
-    @database.setter
-    def database(self, database):
-        """Sets the database ref of this snowflake table."""
-        self._database = database
-
-    @property
-    def schema(self):
-        """Returns the schema name of this snowflake table."""
-        return self._schema
-
-    @schema.setter
-    def schema(self, schema):
-        """Sets the schema of this snowflake table."""
-        self._schema = schema
-
-    @property
     def table(self):
         """Returns the table name of this snowflake table."""
         return self._table
@@ -252,7 +215,7 @@ class SnowflakeOptions:
         self._table = table
 
     @classmethod
-    def from_proto(cls, snowflake_options_proto: DataSourceProto.SnowflakeOptions):
+    def from_proto(cls, snowflake_options_proto: DataSourceProto.CustomSourceOptions):
         """
         Creates a SnowflakeOptions from a protobuf representation of a snowflake option.
 
@@ -262,27 +225,29 @@ class SnowflakeOptions:
         Returns:
             A SnowflakeOptions object based on the snowflake_options protobuf.
         """
+
+        snowflake_configuration = pickle.loads(snowflake_options_proto.configuration)
+
         snowflake_options = cls(
-            database=snowflake_options_proto.database,
-            schema=snowflake_options_proto.schema,
-            table=snowflake_options_proto.table,
-            query=snowflake_options_proto.query,
+            table=snowflake_configuration['table'],
+            query=snowflake_configuration['query'],
         )
 
         return snowflake_options
 
-    def to_proto(self) -> DataSourceProto.SnowflakeOptions:
+    def to_proto(self) -> DataSourceProto.CustomSourceOptions:
         """
         Converts an SnowflakeOptionsProto object to its protobuf representation.
 
         Returns:
             A SnowflakeOptionsProto protobuf.
         """
-        snowflake_options_proto = DataSourceProto.SnowflakeOptions(
-            database=self.database,
-            schema=self.schema,
-            table=self.table,
-            query=self.query,
+        snowflake_options_proto = DataSourceProto.CustomSourceOptions(
+            configuration=pickle.dumps(
+                {
+                    "table": self._table,
+                    "query": self._query,
+                }
+            )
         )
-
         return snowflake_options_proto
