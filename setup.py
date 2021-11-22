@@ -12,7 +12,7 @@ INSTALL_REQUIRE = [
 
 setup(
     name="feast-snowflake",
-    version="0.1.0",
+    version="0.1.1",
     author="Miles Adkins",
     author_email="miles.adkins@snowflake.com",
     description="Snowflake offline store for Feast",
