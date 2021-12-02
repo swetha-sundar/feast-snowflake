@@ -152,7 +152,7 @@ class SnowflakeSource(DataSource):
             config: A RepoConfig describing the feature repo
         """
 
-        from feast_snowflake.snowflake import SnowflakeOfflineStoreConfig
+        from feast_snowflake.snowflake_offline import SnowflakeOfflineStoreConfig
         from feast_snowflake.snowflake_utils import get_snowflake_conn
 
         assert isinstance(config.offline_store, SnowflakeOfflineStoreConfig)

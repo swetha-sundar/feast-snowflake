@@ -26,7 +26,7 @@ registry: ...
 provider: local
 offline_store:
     type: feast_snowflake.SnowflakeOfflineStore
-    deployment: SNOWFLAKE_DEPLOYMENT_URL #drop .snowflakecomputing.com
+    account: SNOWFLAKE_DEPLOYMENT_URL #drop .snowflakecomputing.com
     user: USERNAME
     password: PASSWORD
     role: ROLE_NAME #remember cap sensitive
@@ -34,7 +34,7 @@ offline_store:
     database: DATABASE_NAME #remember cap sensitive
 online_store:
   type: feast_snowflake.SnowflakeOnlineStore
-  deployment: SNOWFLAKE_DEPLOYMENT_URL #drop .snowflakecomputing.com
+  account: SNOWFLAKE_DEPLOYMENT_URL #drop .snowflakecomputing.com
   user: USERNAME
   password: PASSWORD
   role: ROLE_NAME #remember cap sensitive
@@ -53,10 +53,10 @@ import pandas as pd
 
 fs = FeatureStore(repo_path=".")
 
-conn = get_snowflake_conn(fs.config.offline_store)
+with get_snowflake_conn(fs.config.offline_store) as conn:
 
-create_new_snowflake_table(conn, pd.read_parquet('data/driver_stats.parquet'), 'DRIVER_STATS')
-write_pandas(conn, pd.read_parquet('data/driver_stats.parquet'), 'DRIVER_STATS')
+  create_new_snowflake_table(conn, pd.read_parquet('data/driver_stats.parquet'), 'DRIVER_STATS')
+  write_pandas(conn, pd.read_parquet('data/driver_stats.parquet'), 'DRIVER_STATS')
 ```
 
 #### Replace the current text in `example.py` with the following:
