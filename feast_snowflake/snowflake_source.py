@@ -159,24 +159,23 @@ class SnowflakeSource(DataSource):
 
         snowflake_conn = get_snowflake_conn(config.offline_store)
 
-        cur = snowflake_conn.cursor()
-        if self.table is not None:
-            metadata = cur.execute(
-                f'DESCRIBE TABLE {self.table}'
-            ).fetchall()
+        with snowflake_conn as conn:
 
-        else:
-            table_name = "".join(
-                random.choice(string.ascii_lowercase) for _ in range(5)
-            )
-            cur.execute(
-                f'CREATE TEMPORARY TABLE "{table_name}" AS (SELECT * FROM ({self.query}) LIMIT 1)'
-            )
-            metadata = cur.execute(
-                f'DESCRIBE TABLE "{config.offline_store.database}"."PUBLIC"."{table_name}"'
-            ).fetchall()
+            if self.table is not None:
+                metadata = conn.cursor().execute(
+                    f'DESCRIBE TABLE "{self.database}"."{self.schema}"."{self.table}"'
+                ).fetchall()
 
-        cur.close()
+            else:
+                table_name = "".join(
+                    random.choice(string.ascii_lowercase) for _ in range(5)
+                )
+                conn.cursor().execute(
+                    f'CREATE TEMPORARY TABLE "{table_name}" AS (SELECT * FROM ({self.query}) LIMIT 1)'
+                )
+                metadata = conn.cursor().execute(
+                    f'DESCRIBE TABLE "{config.offline_store.database}"."PUBLIC"."{table_name}"'
+                ).fetchall()
 
         return [(column[0], column[1].upper()) for column in metadata]
 

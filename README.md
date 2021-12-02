@@ -23,13 +23,12 @@ cd feature_repo
 #### Edit `feature_store.yaml`
 
 set `offline_store` type to be `feast_snowflake.SnowflakeOfflineStore`
+set `online_store` type to be `feast_snowflake.SnowflakeOnlineStore`
 
 ```yaml
 project: ...
 registry: ...
 provider: local
-online_store:
-    ...
 offline_store:
     type: feast_snowflake.SnowflakeOfflineStore
     deployment: SNOWFLAKE_DEPLOYMENT_URL #drop .snowflakecomputing.com
@@ -38,6 +37,14 @@ offline_store:
     role: ROLE_NAME #remember cap sensitive
     warehouse: WAREHOUSE_NAME #remember cap sensitive
     database: DATABASE_NAME #remember cap sensitive
+online_store:
+  type: feast_snowflake.SnowflakeOnlineStore
+  deployment: SNOWFLAKE_DEPLOYMENT_URL #drop .snowflakecomputing.com
+  user: USERNAME
+  password: PASSWORD
+  role: ROLE_NAME #remember cap sensitive
+  warehouse: WAREHOUSE_NAME #remember cap sensitive
+  database: DATABASE_NAME #remember cap sensitive
 
 ```
 
@@ -57,7 +64,7 @@ create_new_snowflake_table(conn, pd.read_parquet('data/driver_stats.parquet'), '
 write_pandas(conn, pd.read_parquet('data/driver_stats.parquet'), 'DRIVER_STATS')
 ```
 
-#### Edit `example.py`
+#### Replace the current text in `example.py` with the following:
 
 ```python
 # This is an example feature definition file
@@ -97,7 +104,7 @@ driver_hourly_stats_view = FeatureView(
 )
 ```
 
-#### Work with your Offline Snowflake Feature Store
+#### Work with your Offline & Online Snowflake Feature Store
 
 ```python
 from example import driver, driver_hourly_stats_view

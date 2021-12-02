@@ -5,7 +5,6 @@ from typing import Callable, ContextManager, Dict, Iterator, List, Optional, Uni
 import numpy as np
 import pandas as pd
 import pyarrow as pa
-from pydantic import StrictStr
 from pydantic.typing import Literal
 
 from feast import OnDemandFeatureView
@@ -13,6 +12,7 @@ from feast.data_source import DataSource
 from feast.errors import InvalidEntityType
 from feast.feature_view import (
     DUMMY_ENTITY_ID,
+    DUMMY_ENTITY_NAME,
     DUMMY_ENTITY_VAL,
     FeatureView,
 )
@@ -21,6 +21,7 @@ from feast.infra.offline_stores.offline_store import OfflineStore, RetrievalJob
 from feast_snowflake.snowflake_utils import (
     create_new_snowflake_table,
     get_snowflake_conn,
+    write_pandas
 )
 from feast.registry import Registry
 from feast.repo_config import FeastConfigBaseModel, RepoConfig
@@ -35,6 +36,9 @@ except ImportError as e:
 
     raise FeastExtrasDependencyImportError("snowflake", str(e))
 
+from pathlib import Path
+import os
+
 
 class SnowflakeOfflineStoreConfig(FeastConfigBaseModel):
     """ Offline store config for Snowflake """
@@ -42,24 +46,26 @@ class SnowflakeOfflineStoreConfig(FeastConfigBaseModel):
     type: Literal["feast_snowflake.SnowflakeOfflineStore"] = "feast_snowflake.SnowflakeOfflineStore"
     """ Offline store type selector"""
 
-    deployment: StrictStr
+    config_path: Optional[str] = Path(os.environ['HOME']) / '.snowsql/config'
+    """ Snowflake config path -- absolute path required (Cant use ~)"""
+
+    account: Optional[str] = None
     """ Snowflake deployment identifier -- drop .snowflakecomputing.com"""
 
-    user: StrictStr
+    user: Optional[str] = None
     """ Snowflake user name """
 
-    password: StrictStr
+    password: Optional[str] = None
     """ Snowflake password """
 
-    role: StrictStr
+    role: Optional[str] = None
     """ Snowflake role name"""
 
-    warehouse: StrictStr
+    warehouse: Optional[str] = None
     """ Snowflake warehouse name """
 
-    database: StrictStr
+    database: Optional[str] = None
     """ Snowflake database name """
-
 
 class SnowflakeOfflineStore(OfflineStore):
     @staticmethod
@@ -223,45 +229,109 @@ class SnowflakeRetrievalJob(RetrievalJob):
     def _to_df_internal(self) -> pd.DataFrame:
         with self._query_generator() as query:
 
-            cur = self.snowflake_conn.cursor()
-            df = cur.execute(query).fetch_pandas_all()
+            with self.snowflake_conn as conn:
 
-            cur.close()
+                df = conn.cursor().execute(query).fetch_pandas_all()
+
         return df
 
     def _to_arrow_internal(self) -> pa.Table:
         with self._query_generator() as query:
 
-            cur = self.snowflake_conn.cursor()
-            pa_table = cur.execute(query).fetch_arrow_all()
+            with self.snowflake_conn as conn:
 
-            if pa_table:
-                cur.close()
-                return pa_table
+                pa_table = conn.cursor().execute(query).fetch_arrow_all()
+
+                if pa_table:
+
+                    return pa_table
+                else:
+                    empty_result = conn.cursor().execute(query)
+
+                    return pa.Table.from_pandas(
+                        pd.DataFrame(columns=[md.name for md in empty_result.description])
+                    )
+
+    # Used when we use snowflake as a provider
+    # currently no support for odfv
+    def _to_internal_table(
+        self, feature_view: FeatureView, feature_name_columns: List[str]
+    ) -> None:
+        with self._query_generator() as query:
+
+            feature_name_str = "', '".join(feature_name_columns)
+
+            if feature_view.entities[0] == DUMMY_ENTITY_NAME:
+                entity_key = DUMMY_ENTITY_ID
             else:
-                empty_result = cur.execute(query)
-                cur.close()
-                return pa.Table.from_pandas(
-                    pd.DataFrame(columns=[md.name for md in empty_result.description])
-                )
+                entity_key = feature_view.entities[0]
+
+            query = f"""
+                INSERT OVERWRITE INTO "{self.config.online_store.database}"."PUBLIC"."{self.config.project}_{feature_view.name}"
+                    SELECT
+                        "entity_key"::VARIANT,
+                        "feature_name",
+                        "value",
+                        "event_ts",
+                        "created_ts"
+                    FROM
+                    (
+                      SELECT
+                        *,
+                        ROW_NUMBER() OVER(PARTITION BY "entity_key","feature_name" ORDER BY "event_ts" DESC, "created_ts" DESC) AS "_feast_row"
+                      FROM
+                      (
+                        SELECT
+                            "entity_key",
+                            PATH AS "feature_name",
+                            VALUE AS "value",
+                            "event_ts",
+                            "created_ts"
+                        FROM
+                        (
+                          SELECT
+                            "{entity_key}" AS "entity_key",
+                            OBJECT_PICK(OBJECT_CONSTRUCT(*), '{feature_name_str}') AS "feature_name",
+                            "event_timestamp" AS "event_ts",
+                            "created" AS "created_ts"
+                          FROM
+                          (
+                            {query}
+                          )
+                        ), LATERAL FLATTEN(INPUT => "feature_name")
+                        UNION ALL
+                        SELECT
+                            *
+                        FROM
+                            "{self.config.online_store.database}"."PUBLIC"."{self.config.project}_{feature_view.name}"
+                      )
+                    )
+                    WHERE
+                      "_feast_row" = 1;
+                """
+
+            with self.snowflake_conn as conn:
+
+                conn.cursor().execute(query)
+
+        return None
 
     def to_snowflake(self, table_name: str) -> None:
         """ Save dataset as a new Snowflake table """
-        if self.on_demand_feature_views is not None:
-            transformed_df = self.to_df()
+        with self.snowflake_conn as conn:
 
-            create_new_snowflake_table(self.snowflake_conn, transformed_df, table_name)
-            write_pandas(self.snowflake_conn, transformed_df, table_name)
+            if self.on_demand_feature_views is not None:
+                transformed_df = self.to_df()
 
-            return None
+                create_new_snowflake_table(conn, transformed_df, table_name)
+                write_pandas(conn, transformed_df, table_name)
 
-        with self._query_generator() as query:
-            query = f'CREATE TABLE IF NOT EXISTS "{table_name}" AS ({query});\n'
+                return None
 
-            cur = self.snowflake_conn.cursor()
-            cur.execute(query)
+            with self._query_generator() as query:
+                query = f'CREATE TABLE IF NOT EXISTS "{table_name}" AS ({query});\n'
 
-            cur.close()
+                cur = conn.cursor().execute(query)
 
     def to_sql(self) -> str:
         """
@@ -273,40 +343,41 @@ class SnowflakeRetrievalJob(RetrievalJob):
     def to_arrow_chunks(self, arrow_options: Optional[Dict] = None) -> list:
         with self._query_generator() as query:
 
-            with self.snowflake_conn.cursor() as cur:
-                cur.execute(query)
-                arrow_batches = cur.get_result_batches()
+            with self.snowflake_conn as conn:
+
+                arrow_batches = conn.cursor().execute(query).get_result_batches()
 
         return arrow_batches
 
 
 def _upload_entity_df_and_get_entity_schema(
     entity_df: Union[pd.DataFrame, str],
-    snowflake_conn: SnowflakeConnection,
+    conn: SnowflakeConnection,
     config: RepoConfig,
     table_name: str,
 ) -> Dict[str, np.dtype]:
+
     if isinstance(entity_df, pd.DataFrame):
         # If the entity_df is a pandas dataframe, upload it to Snowflake
         # and construct the schema from the original entity_df dataframe
 
         # Write the data from the DataFrame to the table
         create_new_snowflake_table(
-            snowflake_conn, entity_df, table_name, alt_table_type="temporary"
+            conn, entity_df, table_name, alt_table_type="temporary"
         )
-        write_pandas(snowflake_conn, entity_df, table_name)
+        write_pandas(conn, entity_df, table_name)
 
         return dict(zip(entity_df.columns, entity_df.dtypes))
     elif isinstance(entity_df, str):
         # If the entity_df is a string (SQL query), create a Snowflake table out of it,
         # get pandas dataframe consisting of 1 row (LIMIT 1) and generate the schema out of it
-        snowflake_conn.cursor().execute(
+        conn.cursor().execute(
             f'CREATE TEMPORARY TABLE "{table_name}" AS ({entity_df})',
-        ).close()
+        )
 
         limited_entity_df = SnowflakeRetrievalJob(
             f'SELECT * FROM "{table_name}" LIMIT 1',
-            snowflake_conn,
+            conn,
             config,
             full_feature_names=False,
             on_demand_feature_views=None,
