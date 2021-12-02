@@ -163,7 +163,7 @@ class SnowflakeSource(DataSource):
 
             if self.table is not None:
                 metadata = conn.cursor().execute(
-                    f'DESCRIBE TABLE "{self.database}"."{self.schema}"."{self.table}"'
+                    f'DESCRIBE TABLE {self.table}'
                 ).fetchall()
 
             else:
