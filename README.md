@@ -1,10 +1,5 @@
 # Feast Snowflake Offline Store Support
 
-**The public releases have passed all integration tests, please create an issue if you got any problem.**
-
-## Change Logs
-- DONE [v0.1.0] ~~Submit initial working code~~
-
 ## Quickstart
 
 #### Install feast-snowflake
