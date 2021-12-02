@@ -1,4 +1,4 @@
-# Feast Snowflake Offline Store Support
+# Feast Snowflake Offline & Online Store Support
 
 ## Quickstart
 
