@@ -22,8 +22,8 @@ cd feature_repo
 
 #### Edit `feature_store.yaml`
 
-set `offline_store` type to be `feast_snowflake.SnowflakeOfflineStore`
-set `online_store` type to be `feast_snowflake.SnowflakeOnlineStore`
+#set `offline_store` type to be `feast_snowflake.SnowflakeOfflineStore`
+#set `online_store` type to be `feast_snowflake.SnowflakeOnlineStore`
 
 ```yaml
 project: ...
