@@ -344,7 +344,7 @@ def get_snowflake_conn(config) -> SnowflakeConnection:
         role=f'''"{kwargs['role']}"''',
         warehouse=f'''"{kwargs['warehouse']}"''',
         database=f'''"{kwargs['database']}"''',
-        schema="PUBLIC",
+        schema=f'''"{kwargs['schema_']}"''',
         application="feast",
         autocommit=False,
     )

@@ -6,6 +6,7 @@ import configparser
 import pandas as pd
 import pytz
 from pydantic.schema import Literal
+from pydantic import Field
 
 from feast import Entity, FeatureTable
 from feast.feature_view import DUMMY_ENTITY_ID, DUMMY_ENTITY_VAL, FeatureView
@@ -53,6 +54,9 @@ class SnowflakeOnlineStoreConfig(FeastConfigBaseModel):
 
     database: Optional[str] = None
     """ Snowflake database name """
+
+    schema_: Optional[str] = Field("PUBLIC", alias="schema")
+    """ Snowflake schema name """
 
 
 class SnowflakeOnlineStore(OnlineStore):
@@ -112,7 +116,7 @@ class SnowflakeOnlineStore(OnlineStore):
                 write_pandas_binary(conn, agg_df, f"{config.project}_{table.name}")
 
                 query2 = f"""
-                    INSERT OVERWRITE INTO "{config.online_store.database}"."PUBLIC"."{config.project}_{table.name}"
+                    INSERT OVERWRITE INTO "{config.online_store.database}"."{config.online_store.schema_}"."{config.project}_{table.name}"
                         SELECT
                             "entity_key",
                             "feature_name",
@@ -124,7 +128,7 @@ class SnowflakeOnlineStore(OnlineStore):
                               *,
                               ROW_NUMBER() OVER(PARTITION BY "entity_key","feature_name" ORDER BY "event_ts" DESC, "created_ts" DESC) AS "_feast_row"
                           FROM
-                              "{config.online_store.database}"."PUBLIC"."{config.project}_{table.name}")
+                              "{config.online_store.database}"."{config.online_store.schema_}"."{config.project}_{table.name}")
                         WHERE
                             "_feast_row" = 1;
                 """
@@ -153,7 +157,7 @@ class SnowflakeOnlineStore(OnlineStore):
                 SELECT
                     "entity_key", "feature_name", "value", "event_ts"
                 FROM
-                    "{config.online_store.database}"."PUBLIC"."{config.project}_{table.name}"
+                    "{config.online_store.database}"."{config.online_store.schema_}"."{config.project}_{table.name}"
                 WHERE
                     "entity_key" IN ({','.join([('TO_BINARY('+hexlify(serialize_entity_key(entity_key)).__str__()[1:]+")") for entity_key in entity_keys])})
                 ORDER BY
@@ -199,7 +203,7 @@ class SnowflakeOnlineStore(OnlineStore):
 
             for table in tables_to_keep:
                 conn.cursor().execute(
-                    f"""CREATE TABLE IF NOT EXISTS "{config.online_store.database}"."PUBLIC"."{config.project}_{table.name}" (
+                    f"""CREATE TABLE IF NOT EXISTS "{config.online_store.database}"."{config.online_store.schema_}"."{config.project}_{table.name}" (
                         "entity_key" BINARY,
                         "feature_name" VARCHAR,
                         "value" BINARY,
@@ -210,7 +214,7 @@ class SnowflakeOnlineStore(OnlineStore):
 
             for table in tables_to_delete:
                 conn.cursor().execute(
-                    f'DROP TABLE IF EXISTS "{config.online_store.database}"."PUBLIC"."{config.project}_{table.name}"'
+                    f'DROP TABLE IF EXISTS "{config.online_store.database}"."{config.online_store.schema_}"."{config.project}_{table.name}"'
                 )
 
     def teardown(
@@ -226,7 +230,7 @@ class SnowflakeOnlineStore(OnlineStore):
         with snowflake_conn as conn:
 
             for table in tables:
-                query = f'DROP TABLE IF EXISTS "{config.online_store.database}"."PUBLIC"."{config.project}_{table.name}"'
+                query = f'DROP TABLE IF EXISTS "{config.online_store.database}"."{config.online_store.schema_}"."{config.project}_{table.name}"'
                 conn.cursor().execute(query)
 
 def _to_naive_utc(ts: datetime):

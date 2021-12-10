@@ -171,10 +171,10 @@ class SnowflakeSource(DataSource):
                     random.choice(string.ascii_lowercase) for _ in range(5)
                 )
                 conn.cursor().execute(
-                    f'CREATE TEMPORARY TABLE "{table_name}" AS (SELECT * FROM ({self.query}) LIMIT 1)'
+                    f'CREATE TEMPORARY TABLE "{config.offline_store.database}"."{config.offline_store.schema_}"."{table_name}" AS (SELECT * FROM ({self.query}) LIMIT 1)'
                 )
                 metadata = conn.cursor().execute(
-                    f'DESCRIBE TABLE "{config.offline_store.database}"."PUBLIC"."{table_name}"'
+                    f'DESCRIBE TABLE "{config.offline_store.database}"."{config.offline_store.schema_}"."{table_name}"'
                 ).fetchall()
 
         return [(column[0], column[1].upper()) for column in metadata]

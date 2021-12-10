@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 from pydantic.typing import Literal
+from pydantic import Field
 
 from feast import OnDemandFeatureView
 from feast.data_source import DataSource
@@ -66,6 +67,9 @@ class SnowflakeOfflineStoreConfig(FeastConfigBaseModel):
 
     database: Optional[str] = None
     """ Snowflake database name """
+
+    schema_: Optional[str] = Field("PUBLIC", alias="schema")
+    """ Snowflake schema name """
 
 class SnowflakeOfflineStore(OfflineStore):
     @staticmethod
@@ -267,7 +271,7 @@ class SnowflakeRetrievalJob(RetrievalJob):
                 entity_key = feature_view.entities[0]
 
             query = f"""
-                INSERT OVERWRITE INTO "{self.config.online_store.database}"."PUBLIC"."{self.config.project}_{feature_view.name}"
+                INSERT OVERWRITE INTO "{self.config.online_store.database}"."{self.config.online_store.schema_}"."{self.config.project}_{feature_view.name}"
                     SELECT
                         "entity_key"::VARIANT,
                         "feature_name",
@@ -303,7 +307,7 @@ class SnowflakeRetrievalJob(RetrievalJob):
                         SELECT
                             *
                         FROM
-                            "{self.config.online_store.database}"."PUBLIC"."{self.config.project}_{feature_view.name}"
+                            "{self.config.online_store.database}"."{self.config.online_store.schema_}"."{self.config.project}_{feature_view.name}"
                       )
                     )
                     WHERE
