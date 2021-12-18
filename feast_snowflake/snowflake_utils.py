@@ -333,23 +333,32 @@ def get_snowflake_conn(config) -> SnowflakeConnection:
     #read config file
     config_reader = configparser.ConfigParser()
     config_reader.read([config['config_path']])
-    kwargs = dict(config_reader[config_header])
-    if kwargs:
-        kwargs.update( (k,v) for k,v in config.items() if v is not None)
+    if config_reader.has_section(config_header):
+        kwargs = dict(config_reader[config_header])
+    else:
+        kwargs = {}
 
-    conn = snowflake.connector.connect(
-        account=kwargs['account'],
-        user=kwargs['user'],
-        password=kwargs['password'],
-        role=f'''"{kwargs['role']}"''',
-        warehouse=f'''"{kwargs['warehouse']}"''',
-        database=f'''"{kwargs['database']}"''',
-        schema=f'''"{kwargs['schema_']}"''',
-        application="feast",
-        autocommit=False,
-    )
+    kwargs.update( (k,v) for k,v in config.items() if v is not None)
 
-    return conn
+    try:
+        conn = snowflake.connector.connect(
+            account=kwargs['account'],
+            user=kwargs['user'],
+            password=kwargs['password'],
+            role=f'''"{kwargs['role']}"''',
+            warehouse=f'''"{kwargs['warehouse']}"''',
+            database=f'''"{kwargs['database']}"''',
+            schema=f'''"{kwargs['schema_']}"''',
+            application="feast",
+            autocommit=False,
+        )
+
+        return conn
+
+    except KeyError as e:
+        print(f'{e} not defined in a config file or feature_store.yaml file')
+
+
 
 def write_pandas(
     conn: "SnowflakeConnection",
