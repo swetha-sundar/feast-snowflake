@@ -350,14 +350,11 @@ def get_snowflake_conn(config) -> SnowflakeConnection:
             database=f'''"{kwargs['database']}"''',
             schema=f'''"{kwargs['schema_']}"''',
             application="feast",
-            autocommit=False,
-        )
-
+            autocommit=False,)
+            
         return conn
-
     except KeyError as e:
         print(f'{e} not defined in a config file or feature_store.yaml file')
-
 
 
 def write_pandas(
