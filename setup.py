@@ -7,7 +7,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 INSTALL_REQUIRE = [
     "feast>=0.15.*",
-    "snowflake-connector-python[pandas]==2.6.*",
+    "snowflake-connector-python[pandas]>=2.6.*",
 ]
 
 setup(
