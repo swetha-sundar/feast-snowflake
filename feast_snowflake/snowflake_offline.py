@@ -1,6 +1,6 @@
 import contextlib
 from datetime import datetime
-from typing import Callable, ContextManager, Dict, Iterator, List, Optional, Union
+from typing import Callable, ContextManager, Dict, Iterator, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -166,9 +166,13 @@ class SnowflakeOfflineStore(OfflineStore):
                 entity_schema, expected_join_keys, entity_df_event_timestamp_col
             )
 
+            entity_df_timestamp_range = _get_entity_df_event_timestamp_range(
+                entity_df, entity_df_event_timestamp_col, snowflake_conn, config, table_name,
+            )
+
             # Build a query context containing all information required to template the Snowflake SQL query
             query_context = offline_utils.get_feature_view_query_context(
-                feature_refs, feature_views, registry, project,
+                feature_refs, feature_views, registry, project, entity_df_timestamp_range
             )
 
             query_context = _fix_entity_selections_identifiers(query_context)
@@ -220,7 +224,7 @@ class SnowflakeRetrievalJob(RetrievalJob):
         self.snowflake_conn = snowflake_conn
         self.config = config
         self._full_feature_names = full_feature_names
-        self._on_demand_feature_views = on_demand_feature_views
+        self._on_demand_feature_views = (on_demand_feature_views if on_demand_feature_views else [])
 
     @property
     def full_feature_names(self) -> bool:
@@ -400,6 +404,39 @@ def _fix_entity_selections_identifiers(query_context) -> list:
 
     return query_context
 
+def _get_entity_df_event_timestamp_range(
+    entity_df: Union[pd.DataFrame, str],
+    entity_df_event_timestamp_col: str,
+    snowflake_client,
+    config: RepoConfig,
+    table_name: str,
+) -> Tuple[datetime, datetime]:
+    if isinstance(entity_df, pd.DataFrame):
+        entity_df_event_timestamp = entity_df.loc[
+            :, entity_df_event_timestamp_col
+        ].infer_objects()
+        if pd.api.types.is_string_dtype(entity_df_event_timestamp):
+            entity_df_event_timestamp = pd.to_datetime(
+                entity_df_event_timestamp, utc=True
+            )
+        entity_df_event_timestamp_range = (
+            entity_df_event_timestamp.min(),
+            entity_df_event_timestamp.max(),
+        )
+    elif isinstance(entity_df, str):
+        # If the entity_df is a string (SQL query), determine range
+        # from table
+        job = snowflake_client.query(f"SELECT MIN({entity_df_event_timestamp_col}) AS min, MAX({entity_df_event_timestamp_col}) AS max FROM {table_name}"
+        )
+        res = next(job.result())
+        entity_df_event_timestamp_range = (
+            res.get("min"),
+            res.get("max"),
+        )
+    else:
+        raise InvalidEntityType(type(entity_df))
+
+    return entity_df_event_timestamp_range
 
 MULTIPLE_FEATURE_VIEW_POINT_IN_TIME_JOIN = """
 /*
@@ -464,9 +501,9 @@ WITH "entity_dataframe" AS (
             "{{ feature }}" as {% if full_feature_names %}"{{ featureview.name }}"__"{{feature}}"{% else %}"{{ feature }}"{% endif %}{% if loop.last %}{% else %}, {% endif %}
         {% endfor %}
     FROM {{ featureview.table_subquery }}
-    WHERE "{{ featureview.event_timestamp_column }}" <= (SELECT MAX("entity_timestamp") FROM "entity_dataframe")
+    WHERE "{{ featureview.event_timestamp_column }}" <= '{{ featureview.max_event_timestamp }}'
     {% if featureview.ttl == 0 %}{% else %}
-    AND "{{ featureview.event_timestamp_column }}" >= TIMESTAMPADD(second,-{{ featureview.ttl }},(SELECT MIN("entity_timestamp") FROM "entity_dataframe"))
+    AND "{{ featureview.event_timestamp_column }}" >= '{{ featureview.min_event_timestamp }}'
     {% endif %}
 ),
 

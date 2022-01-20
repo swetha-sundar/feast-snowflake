@@ -351,7 +351,7 @@ def get_snowflake_conn(config) -> SnowflakeConnection:
             schema=f'''"{kwargs['schema_']}"''',
             application="feast",
             autocommit=False,)
-            
+
         return conn
     except KeyError as e:
         print(f'{e} not defined in a config file or feature_store.yaml file')
